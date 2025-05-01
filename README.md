@@ -39,8 +39,7 @@ There are two main ways to set up and run Scout-Edge:
     ```
 
 3.  **Install dependencies from `requirements.txt`:**
-    *   *(Note: Ensure `requirements.txt` is up-to-date. If you primarily use `pyproject.toml`, you might generate `requirements.txt` using tools like `pip-tools` or manually list essential runtime dependencies).* 
-    *   If `requirements.txt` exists and is maintained:
+    *   Use `requirements.txt`:
         ```bash
         pip install -r requirements.txt 
         ```
@@ -60,11 +59,11 @@ There are two main ways to set up and run Scout-Edge:
 
 **Method 2: Installing as a Package (System-wide or User-level)**
 
-This method installs Scout-Edge like any other Python package, making the `scout-edge` command available directly in your terminal (if the installation location is in your system's PATH).
+This method installs Scout-Edge like any other Python package, making the `scout-edge` command available directly in your terminal.
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/egeyavuzcan/scout-edge # Replace with your repo URL
+    git clone https://github.com/egeyavuzcan/scout-edge 
     cd scout-edge
     ```
 
@@ -78,7 +77,6 @@ This method installs Scout-Edge like any other Python package, making the `scout
     *   Create a `.env` file in the directory where you will *run* the `scout-edge` command, or ensure the environment variables are set globally. The application will look for a `.env` file in the current working directory when executed.
 
 4.  **Run the CLI:**
-    *   *(Note: This assumes the installation script correctly sets up the entry point in `pyproject.toml`. We need to add this entry point.)*
     *   Assuming the entry point is configured (see **Adding CLI Entry Point** below):
         ```bash
         scout-edge --help
