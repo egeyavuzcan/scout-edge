@@ -6,17 +6,16 @@ build-backend = "setuptools.build_meta"
 name = "scout-edge"
 version = "0.1.0"
 authors = [
-  { name="Ege Yalım", email="egeyalim@example.com" }, # Update email
+  { name="Ege Yavuzcan", email="egeyavuzcan@hotmail.com.com" }, 
 ]
 description = "An AI trend tracking system using LangChain."
 readme = "README.md"
-license = { file="LICENSE" }
+
 requires-python = ">=3.9" # Adjust based on the Python version you are using
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Operating System :: OS Independent"
 ]
 dependencies = [
     "langchain>=0.1.0,<0.2.0",
@@ -30,7 +29,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/egeyalim/scout-edge" # Update with your GitHub username/repo name
+Homepage = "https://github.com/egeyavuzcan/scout-edge" 
 
 [project.scripts]
 scout-edge = "src.ui.cli:main"
