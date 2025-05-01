@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scout-edge"
+version = "0.1.0"
+authors = [
+  { name="Ege Yalım", email="egeyalim@example.com" }, # Update email
+]
+description = "An AI trend tracking system using LangChain."
+readme = "README.md"
+license = { file="LICENSE" }
+requires-python = ">=3.9" # Adjust based on the Python version you are using
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "langchain>=0.1.0,<0.2.0",
+    "langchain-openai>=0.1.0,<0.2.0",
+    "arxiv>=2.0.0,<3.0.0",
+    "requests>=2.30.0,<3.0.0",
+    "PyGithub>=2.0.0,<3.0.0",
+    "python-dotenv>=1.0.0,<2.0.0",
+    "google-search-results>=2.4.0,<3.0.0", # Required for Serper
+    "feedparser>=6.0.0,<7.0.0", # Dependency for arxiv
+]
+
+[project.urls]
+Homepage = "https://github.com/egeyalim/scout-edge" # Update with your GitHub username/repo name
+
+[project.scripts]
+scout-edge = "src.ui.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]  # Indicates that the code is in the 'src' directory

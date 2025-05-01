@@ -13,12 +13,20 @@ GITHUB_API_KEY = os.getenv("GITHUB_API_KEY")
 SERPER_API_KEY = os.getenv("SERPER_API_KEY")
 HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
 
+# Tool-specific settings (with defaults)
+ARXIV_MAX_RESULTS = int(os.getenv("ARXIV_MAX_RESULTS", "10"))
+GITHUB_MAX_RESULTS = int(os.getenv("GITHUB_MAX_RESULTS", "10"))
+
 # LLM settings
 LLM_MODEL = os.getenv("LLM_MODEL", "gpt-3.5-turbo")
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
 
 # Database settings
 VECTORSTORE_PATH = os.getenv("VECTORSTORE_PATH", "./data/vectorstore")
+
+# Application settings
+VERBOSE_MODE = os.getenv("VERBOSE_MODE", "False").lower() == "true"
+DATA_DIR = os.getenv("DATA_DIR", "./data")
 
 # ArXiv categories
 ARXIV_CATEGORIES = [

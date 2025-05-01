@@ -2,27 +2,32 @@
 Serper tool - Tool for fetching Google search results for the Scout-Edge platform.
 """
 import logging
-import sys
-import os
-import json
-import requests
-from typing import Dict, List, Any, Optional
+from typing import Optional, Type, Any, List, Dict
 
 from langchain.tools import BaseTool
+from pydantic import BaseModel, Field
 
 # Import configuration settings
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 
 logger = logging.getLogger(__name__)
 
 
+class SerperSearchInput(BaseModel):
+    """Input schema for SerperSearchTool."""
+    query: str = Field(description="The search query for Serper API")
+
+
 class SerperSearchTool(BaseTool):
-    """
-    LangChain tool using Serper.dev API to fetch Google search results.
-    """
-    name = "serper_search"
-    description = "Used to fetch search results from Google. Ideal for searching AI and technology news."
+    """Tool for performing searches using the Serper API."""
+    name: str = "serper_search"
+    description: str = (
+        "Uses Google Serper API to search the web for a given query. "
+        "Useful for finding real-time information or news."
+    )
+    args_schema: Type[BaseModel] = SerperSearchInput
+    api_key: Optional[str] = None  # Define at class level
+    search_wrapper: Optional[Any] = None  # Define at class level
     
     def __init__(self, api_key: Optional[str] = None):
         """
@@ -33,89 +38,25 @@ class SerperSearchTool(BaseTool):
         """
         super().__init__()
         self.api_key = api_key or config.SERPER_API_KEY
-        self.base_url = "https://google.serper.dev/search"
         
-    def _run(self, query: str, search_type: str = "news", 
-             num_results: int = 10) -> List[Dict[str, Any]]:
-        """
-        Fetch Google search results based on specified query and parameters.
-        
-        Args:
-            query (str): Search query
-            search_type (str): Search type (news, web, places, images)
-            num_results (int): Number of results to return
-            
-        Returns:
-            List[Dict[str, Any]]: List of search results
-        """
-        if not self.api_key:
-            error_msg = "Serper API key not found. Please define SERPER_API_KEY in config.py."
-            logger.error(error_msg)
-            return {"error": error_msg}
-            
+    def _run(self, query: str) -> str:
+        """Run the search query through the Serper API."""
+        if not self.search_wrapper:
+            logger.error("Serper search wrapper not initialized. API key might be missing.")
+            return "Error: Serper API key not configured or wrapper failed to initialize."
         try:
-            headers = {
-                "X-API-KEY": self.api_key,
-                "Content-Type": "application/json"
-            }
-            
-            payload = {
-                "q": query,
-                "gl": "us",  # Location setting (USA)
-                "hl": "en",  # Language setting (English)
-                "num": num_results
-            }
-            
-            response = requests.post(
-                self.base_url, 
-                headers=headers, 
-                json=payload
-            )
-            
-            if response.status_code != 200:
-                error_msg = f"Serper API error: {response.status_code}, {response.text}"
-                logger.error(error_msg)
-                return {"error": error_msg}
-                
-            data = response.json()
-            results = []
-            
-            # Process results according to search type
-            if search_type == "news" and "news" in data:
-                for item in data["news"]:
-                    result = {
-                        "title": item.get("title", ""),
-                        "link": item.get("link", ""),
-                        "snippet": item.get("snippet", ""),
-                        "date": item.get("date", ""),
-                        "source": item.get("source", ""),
-                        "imageUrl": item.get("imageUrl", ""),
-                        "type": "news"
-                    }
-                    results.append(result)
-            elif "organic" in data:
-                for item in data["organic"]:
-                    result = {
-                        "title": item.get("title", ""),
-                        "link": item.get("link", ""),
-                        "snippet": item.get("snippet", ""),
-                        "position": item.get("position", 0),
-                        "type": "web"
-                    }
-                    results.append(result)
-            
-            logger.info(f"Found {len(results)} results in Google search.")
+            logger.info(f"Performing Serper search for query: '{query}'")
+            # Use the initialized wrapper to run the search
+            results = self.search_wrapper.run(query)
+            logger.info("Serper search completed.")
             return results
-            
         except Exception as e:
-            error_msg = f"Error during Serper search: {str(e)}"
-            logger.error(error_msg)
-            return {"error": error_msg}
-    
-    async def _arun(self, query: str, search_type: str = "news", 
-                   num_results: int = 10) -> List[Dict[str, Any]]:
+            logger.error(f"Error during Serper search: {e}")
+            return f"Error performing search: {e}"
+
+    async def _arun(self, query: str) -> str:
         """Async method required for the tool (currently calls the sync method)"""
-        return self._run(query, search_type, num_results)
+        return self._run(query)
 
 
 class NewsAnalyzer:
@@ -147,9 +88,7 @@ class NewsAnalyzer:
         full_query = f"{query} latest news research developments"
         
         results = self.serper_tool._run(
-            query=full_query,
-            search_type="news",
-            num_results=num_results
+            query=full_query
         )
         
         return results if isinstance(results, list) else []

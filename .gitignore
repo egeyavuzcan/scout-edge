@@ -129,6 +129,7 @@ celerybeat.pid
 
 # Environments
 .env
+scout-env/
 .venv
 env/
 venv/
@@ -172,3 +173,13 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Project-specific ignores
+.env
+scout-env/
+*.json
+data/
+
+# IDE / Editor specific files
+.vscode/
+.idea/

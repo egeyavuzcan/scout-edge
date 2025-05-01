@@ -1,197 +1,193 @@
-"""
-ArXiv tool - Search and process ArXiv papers for the Scout-Edge platform.
-"""
 import logging
-import sys
-import os
-import time
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 
 import arxiv
 from langchain.tools import BaseTool
 
-# Import configuration settings
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 
 logger = logging.getLogger(__name__)
 
 
 class ArxivSearchTool(BaseTool):
-    """
-    LangChain tool for searching AI papers from ArXiv.
-    """
-    name = "arxiv_search"
-    description = "Used to search and analyze artificial intelligence papers from ArXiv."
-    
-    def _run(self, query: str, max_results: int = 10, time_period_days: int = 30,
-             categories: Optional[List[str]] = None) -> List[Dict[str, Any]]:
-        """
-        Search for papers from ArXiv based on specified query and parameters.
-        
-        Args:
-            query (str): Search query
-            max_results (int): Maximum number of results
-            time_period_days (int): How many days of papers to search
-            categories (List[str], optional): Categories to search
-            
-        Returns:
-            List[Dict[str, Any]]: List of found papers
-        """
-        if categories is None:
-            categories = config.ARXIV_CATEGORIES
-            
-        # Combine categories in ArXiv format
-        category_query = " OR ".join([f"cat:{cat}" for cat in categories])
-        
-        # Create the full query
-        full_query = f"({category_query}) AND ({query})"
-        
+    """Tool for searching scientific papers on ArXiv."""
+    name: str = "arxiv_search"
+    description: str = (
+        "Search ArXiv for research papers based on a query. "
+        "Useful for finding recent scientific literature."
+    )
+    arxiv_client: Optional[arxiv.Client] = None
+
+    def __init__(self, **kwargs):
+        """Initialize the ArxivSearchTool."""
+        super().__init__(**kwargs)
         try:
-            # Configure ArXiv search
+            self.arxiv_client = arxiv.Client()
+            logger.info("ArXiv client initialized successfully.")
+        except Exception as e:
+            logger.error(f"Error initializing ArXiv client: {e}")
+            self.arxiv_client = None
+
+    def _run(self, query: str) -> List[Dict[str, Any]]:
+        """
+        Search for papers on ArXiv based on the query.
+
+        Args:
+            query: The search query string.
+
+        Returns:
+            A list of dictionaries, each containing details of a paper.
+        """
+        if not self.arxiv_client:
+            return [{"error": "ArXiv client not initialized."}]
+
+        max_results = config.ARXIV_MAX_RESULTS
+        sort_by = arxiv.SortCriterion.SubmittedDate
+        sort_order = arxiv.SortOrder.Descending
+
+        try:
             search = arxiv.Search(
-                query=full_query,
+                query=query,
                 max_results=max_results,
-                sort_by=arxiv.SortCriterion.SubmittedDate,
-                sort_order=arxiv.SortOrder.Descending
+                sort_by=sort_by,
+                sort_order=sort_order
             )
-            
-            # Collect results
+
             results = []
-            for paper in search.results():
-                # Check if within time_period_days
-                if time_period_days > 0:
-                    paper_date = paper.published
-                    cutoff_date = datetime.now() - timedelta(days=time_period_days)
-                    if paper_date < cutoff_date:
-                        continue
-                
-                # Extract paper information
-                authors = [author.name for author in paper.authors]
-                categories = [cat for cat in paper.categories]
-                
-                # Create result dictionary
-                paper_dict = {
-                    "id": paper.entry_id,
-                    "title": paper.title,
+            logger.info(f"Executing ArXiv search for query: '{query}'")
+            papers = list(self.arxiv_client.results(search))
+
+            if not papers:
+                logger.info(f"No ArXiv papers found for query: '{query}'")
+                return [{"message": "No results found."}]
+
+            for result in papers:
+                authors = [author.name for author in result.authors]
+
+                paper_details = {
+                    "entry_id": result.entry_id,
+                    "title": result.title,
                     "authors": authors,
-                    "summary": paper.summary,
-                    "categories": categories,
-                    "published": paper.published.strftime("%Y-%m-%d"),
-                    "updated": paper.updated.strftime("%Y-%m-%d") if paper.updated else None,
-                    "url": paper.pdf_url,
+                    "published_date": result.published.strftime("%Y-%m-%d"),
+                    "summary": result.summary,
+                    "pdf_url": result.pdf_url,
+                    "doi": result.doi,
+                    "primary_category": result.primary_category,
+                    "categories": result.categories,
                     "source": "arxiv"
                 }
-                
-                results.append(paper_dict)
-            
-            logger.info(f"Found {len(results)} papers from ArXiv.")
+                results.append(paper_details)
+
+            logger.info(f"Found {len(results)} papers from ArXiv for query: '{query}'")
             return results
-            
+
         except Exception as e:
-            error_msg = f"Error during ArXiv search: {str(e)}"
-            logger.error(error_msg)
-            return {"error": error_msg}
-    
-    async def _arun(self, query: str, max_results: int = 10, time_period_days: int = 30,
-                   categories: Optional[List[str]] = None) -> List[Dict[str, Any]]:
-        """Async method required for the tool (currently calls the sync method)"""
-        return self._run(query, max_results, time_period_days, categories)
+            logger.error(f"Error during ArXiv search for query '{query}': {e}")
+            return [{"error": f"An error occurred during ArXiv search: {e}"}]
+
+    async def _arun(self, query: str) -> List[Dict[str, Any]]:
+        """Asynchronous version of the search logic."""
+        logger.info("Async search request, running sync version.")
+        return self._run(query)
 
 
 class ArxivTrendAnalyzer:
     """
-    Class for analyzing trends from ArXiv papers.
+    Analyzes trends based on ArXiv papers.
     """
-    def __init__(self, categories: Optional[List[str]] = None):
+
+    def __init__(self, tags: List[str], arxiv_tool: ArxivSearchTool):
+        """Initialize the ArxivTrendAnalyzer."""
+        self.tags = tags
+        self.arxiv_tool = arxiv_tool
+        logger.info(f"ArxivTrendAnalyzer initialized with tags: {tags}")
+
+    def collect_data(
+        self,
+        days: int = 7,
+        max_papers: int = 50
+    ) -> List[Dict[str, Any]]:
         """
-        Initialize the ArxivTrendAnalyzer class.
-        
+        Collect data from ArXiv for the specified tags and time period.
+
         Args:
-            categories (List[str], optional): Categories to analyze
-        """
-        self.categories = categories or config.ARXIV_CATEGORIES
-        self.arxiv_tool = ArxivSearchTool()
-        
-    def get_recent_papers(self, days: int = 7, 
-                          max_papers: int = 100) -> List[Dict[str, Any]]:
-        """
-        Get papers from recent days.
-        
-        Args:
-            days (int): How many days of papers to retrieve
-            max_papers (int): Maximum number of papers
-            
+            days (int): The number of past days to consider for trends.
+            max_papers (int): Max papers to fetch per tag.
+
         Returns:
-            List[Dict[str, Any]]: List of papers
+            List[Dict[str, Any]]: A list of paper data.
         """
-        # Query based on category
         all_papers = []
-        
-        for category in self.categories:
-            # Search for each category separately
-            papers = self.arxiv_tool._run(
-                query=f"cat:{category}",
-                max_results=max_papers // len(self.categories),
-                time_period_days=days,
-                categories=[category]
-            )
-            
-            if isinstance(papers, list):
-                all_papers.extend(papers)
-            
-            # Brief wait to avoid exceeding API rate limits
-            time.sleep(1)
-            
+        if not self.tags:
+            logger.warning("No tags provided for data collection.")
+            return []
+
+        papers_per_tag = max_papers // len(self.tags)
+
+        cutoff_date = datetime.now() - timedelta(days=days)
+
+        for tag in self.tags:
+            papers = self.arxiv_tool._run(query=tag)
+
+            if isinstance(papers, list) and papers and "error" not in papers[0]:
+                recent_papers = [
+                    p for p in papers
+                    if datetime.strptime(p['published_date'], "%Y-%m-%d")
+                    >= cutoff_date
+                ]
+                all_papers.extend(recent_papers[:papers_per_tag])
+            elif isinstance(papers, list) and papers and "message" in papers[0]:
+                logger.info(f"No results for tag '{tag}' on ArXiv.")
+            elif isinstance(papers, list) and papers and "error" in papers[0]:
+                logger.warning(
+                    f"Error fetching data for tag '{tag}': {papers[0]['error']}"
+                )
+
+        logger.info(f"Collected {len(all_papers)} recent papers in total.")
         return all_papers
-        
-    def analyze_trends(self, papers: List[Dict[str, Any]]) -> Dict[str, Any]:
+
+    def analyze(self, papers: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
-        Analyze papers to determine trends.
-        
+        Analyze the collected paper data to identify trends.
+
         Args:
-            papers (List[Dict[str, Any]]): Papers to analyze
-            
+            papers (List[Dict[str, Any]]): List of paper data.
+
         Returns:
-            Dict[str, Any]: Trend analysis results
+            Dict[str, Any]: Analysis results including top papers and categories.
         """
         if not papers:
-            return {"error": "No papers found for analysis."}
-            
-        # Simple trend analysis
-        # This part could be enhanced with LLM in the future
-        
-        # Author analysis
-        author_counts = {}
-        for paper in papers:
-            for author in paper.get("authors", []):
-                author_counts[author] = author_counts.get(author, 0) + 1
-                
-        # Category analysis
+            return {"error": "No paper data to analyze."}
+
         category_counts = {}
         for paper in papers:
-            for category in paper.get("categories", []):
-                category_counts[category] = category_counts.get(category, 0) + 1
-                
-        # Publication date analysis
-        date_counts = {}
-        for paper in papers:
-            pub_date = paper.get("published")
-            if pub_date:
-                date_counts[pub_date] = date_counts.get(pub_date, 0) + 1
-        
-        # Create trend report
-        trends = {
-            "total_papers": len(papers),
-            "top_authors": sorted(author_counts.items(), 
-                                   key=lambda x: x[1], reverse=True)[:10],
-            "top_categories": sorted(category_counts.items(), 
-                                      key=lambda x: x[1], reverse=True),
-            "publication_dates": sorted(date_counts.items()),
-            "latest_papers": sorted(papers, 
-                                     key=lambda x: x.get("published", ""), 
-                                     reverse=True)[:5]
+            cat = paper.get("primary_category")
+            if cat:
+                category_counts[cat] = category_counts.get(cat, 0) + 1
+
+        sorted_papers = sorted(
+            papers, key=lambda x: x.get("published_date", ""), reverse=True
+        )
+
+        top_n = 5
+        top_papers = sorted_papers[:top_n]
+
+        analysis_summary = {
+            "total_papers_analyzed": len(papers),
+            "top_papers": [
+                {
+                    "title": p.get("title"),
+                    "url": p.get("pdf_url", p.get("entry_id")),
+                    "published": p.get("published_date")
+                } for p in top_papers
+            ],
+            "category_distribution": sorted(
+                category_counts.items(),
+                key=lambda item: item[1],
+                reverse=True
+            )[:10],
+            "comment": "Trend analysis based on recent paper categories and publication dates."
         }
-        
-        return trends
+
+        return analysis_summary

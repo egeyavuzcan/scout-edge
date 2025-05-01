@@ -1,226 +1,239 @@
-"""
-GitHub tool - Search and process GitHub repositories for the Scout-Edge platform.
-"""
 import logging
-import sys
-import os
-import time
-from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Type
 
-from github import Github, GithubException
+import requests
 from langchain.tools import BaseTool
+from pydantic import BaseModel, Field
 
 # Import configuration settings
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 
 logger = logging.getLogger(__name__)
 
 
+class GitHubTrendInput(BaseModel):
+    """Input schema for GitHubTrendTool."""
+    query: str = Field(description="The search query for GitHub repositories")
+
+
 class GitHubTrendTool(BaseTool):
-    """
-    LangChain tool for searching AI projects from GitHub.
-    """
-    name = "github_trend_search"
-    description = "Used to search for artificial intelligence projects on GitHub and analyze trends."
-    
-    def __init__(self, api_key: Optional[str] = None):
-        """
-        Initialize the GitHubTrendTool class.
-        
-        Args:
-            api_key (str, optional): GitHub API key
-        """
-        super().__init__()
-        self.api_key = api_key or config.GITHUB_API_KEY
-        self.github = Github(self.api_key)
-        
-    def _run(self, query: str, min_stars: int = 100, max_results: int = 10, 
-             time_period_days: int = 30, language: Optional[str] = None) -> List[Dict[str, Any]]:
-        """
-        Search for projects from GitHub based on specified query and parameters.
-        
-        Args:
-            query (str): Search query
-            min_stars (int): Minimum number of stars
-            max_results (int): Maximum number of results
-            time_period_days (int): How many days of projects to search
-            language (str, optional): Programming language filter
-            
-        Returns:
-            List[Dict[str, Any]]: List of found projects
-        """
-        # Calculate recent date
-        if time_period_days > 0:
-            cutoff_date = datetime.now() - timedelta(days=time_period_days)
-            date_filter = f" created:>{cutoff_date.strftime('%Y-%m-%d')}"
-        else:
-            date_filter = ""
-            
-        # Language filter
-        lang_filter = f" language:{language}" if language else ""
-        
-        # Star filter
-        star_filter = f" stars:>{min_stars}"
-        
-        # Create the full query
-        full_query = f"{query}{star_filter}{lang_filter}{date_filter}"
-        
-        try:
-            # Perform GitHub search
-            repositories = self.github.search_repositories(
-                query=full_query,
-                sort="stars",
-                order="desc"
+    """Tool for searching trending AI projects on GitHub."""
+    name: str = "github_trend_search"
+    description: str = (
+        "Searches GitHub for trending repositories based on a query, "
+        "focusing on stars and recent activity. Useful for finding popular "
+        "AI projects."
+    )
+    args_schema: Type[BaseModel] = GitHubTrendInput
+    github_api_key: Optional[str] = None
+
+    def __init__(self, **kwargs: Any):
+        """Initialize the GitHubTrendTool."""
+        super().__init__(**kwargs)
+        self.github_api_key = config.GITHUB_API_KEY
+        if not self.github_api_key:
+            logger.warning(
+                "GitHub API key not found. Requests will be unauthenticated."
             )
-            
-            # Collect results
+
+    def _run(self, query: str) -> List[Dict[str, Any]]:
+        """
+        Search GitHub for trending repositories matching the query.
+
+        Args:
+            query: The search query string (e.g., 'artificial intelligence').
+
+        Returns:
+            A list of dictionaries, each containing details of a trending repo.
+        """
+        # Default internal parameters for the search
+        sort = "stars"  # Focus on popular repositories
+        order = "desc"
+        per_page = config.GITHUB_MAX_RESULTS  # Limit results via config
+
+        headers = {
+            "Accept": "application/vnd.github.v3+json"
+        }
+        if self.github_api_key:
+            headers["Authorization"] = f"token {self.github_api_key}"
+
+        # Construct the search URL
+        # Example: Find repositories matching 'query', sort by stars desc
+        search_url = (
+            f"https://api.github.com/search/repositories?q={query}"
+            f"&sort={sort}&order={order}&per_page={per_page}"
+        )
+
+        logger.info(f"Executing GitHub search: {search_url}")
+
+        try:
+            response = requests.get(search_url, headers=headers)
+            response.raise_for_status()  # Raise HTTPError for bad responses (4XX, 5XX)
+
+            data = response.json()
+            items = data.get("items", [])
+
+            if not items:
+                logger.info(f"No GitHub repositories found for query: '{query}'")
+                return [{"message": "No results found."}]
+
             results = []
-            count = 0
-            
-            for repo in repositories:
-                if count >= max_results:
-                    break
-                    
-                # Extract repository information
-                repo_dict = {
-                    "id": repo.id,
-                    "name": repo.name,
-                    "full_name": repo.full_name,
-                    "description": repo.description,
-                    "stars": repo.stargazers_count,
-                    "forks": repo.forks_count,
-                    "language": repo.language,
-                    "created_at": repo.created_at.strftime("%Y-%m-%d"),
-                    "updated_at": repo.updated_at.strftime("%Y-%m-%d"),
-                    "url": repo.html_url,
-                    "topics": repo.get_topics(),
+            for item in items:
+                repo_details = {
+                    "name": item.get("name"),
+                    "full_name": item.get("full_name"),
+                    "url": item.get("html_url"),
+                    "description": item.get("description"),
+                    "stars": item.get("stargazers_count"),
+                    "forks": item.get("forks_count"),
+                    "language": item.get("language"),
+                    "created_at": item.get("created_at"),
+                    "updated_at": item.get("updated_at"),
+                    "owner": item.get("owner", {}).get("login"),
                     "source": "github"
                 }
-                
-                results.append(repo_dict)
-                count += 1
-                
-                # To avoid exceeding API rate limits
-                if count % 10 == 0:
-                    time.sleep(2)
-            
-            logger.info(f"Found {len(results)} repositories from GitHub.")
+                results.append(repo_details)
+
+            logger.info(
+                f"Found {len(results)} trending repositories on GitHub for query: '{query}'"
+            )
             return results
-            
-        except GithubException as e:
-            error_msg = f"Error during GitHub search: {str(e)}"
-            logger.error(error_msg)
-            return {"error": error_msg}
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error during GitHub search for query '{query}': {e}")
+            return [{"error": f"An error occurred during GitHub search: {e}"}]
         except Exception as e:
-            error_msg = f"Unexpected error: {str(e)}"
-            logger.error(error_msg)
-            return {"error": error_msg}
-    
-    async def _arun(self, query: str, min_stars: int = 100, max_results: int = 10,
-                  time_period_days: int = 30, language: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Async method required for the tool (currently calls the sync method)"""
-        return self._run(query, min_stars, max_results, time_period_days, language)
+            logger.error(
+                f"Unexpected error processing GitHub results for query '{query}': {e}"
+            )
+            return [{"error": f"An unexpected error occurred: {e}"}]
+
+    async def _arun(self, query: str) -> List[Dict[str, Any]]:
+        """Asynchronous version of the search logic."""
+        # Placeholder: True async would use an async HTTP client like httpx
+        logger.info("Async GitHub search request, running sync version.")
+        return self._run(query)
 
 
 class GitHubTrendAnalyzer:
     """
-    Class for analyzing trends from GitHub projects.
+    Analyzes trends based on GitHub repositories.
     """
-    def __init__(self, api_key: Optional[str] = None):
+
+    def __init__(self, tags: List[str], github_tool: GitHubTrendTool):
+        """Initialize the GitHubTrendAnalyzer."""
+        self.tags = tags
+        self.github_tool = github_tool
+        logger.info(f"GitHubTrendAnalyzer initialized with tags: {tags}")
+
+    def collect_data(
+        self,
+        days: int = 30,
+        max_repos: int = 50
+    ) -> List[Dict[str, Any]]:
         """
-        Initialize the GitHubTrendAnalyzer class.
-        
+        Collect data from GitHub for the specified tags and time period.
+
         Args:
-            api_key (str, optional): GitHub API key
-        """
-        self.api_key = api_key or config.GITHUB_API_KEY
-        self.github_tool = GitHubTrendTool(api_key=self.api_key)
-        self.tags = config.GITHUB_TAGS
-        
-    def get_trending_repos(self, days: int = 30, min_stars: int = 100, 
-                           max_repos: int = 50) -> List[Dict[str, Any]]:
-        """
-        Get trending repositories from recent days.
-        
-        Args:
-            days (int): How many days of projects to retrieve
-            min_stars (int): Minimum number of stars
-            max_repos (int): Maximum number of repositories
-            
+            days (int): The number of past days to consider for trends.
+            max_repos (int): The maximum number of repositories to fetch per tag.
+
         Returns:
-            List[Dict[str, Any]]: List of repositories
+            List[Dict[str, Any]]: A list of repository data.
         """
-        # Query based on tags
         all_repos = []
-        
+        repos_per_tag = max_repos // len(self.tags) if self.tags else max_repos
+
         for tag in self.tags:
             # Search separately for each tag
-            repos = self.github_tool._run(
-                query=tag,
-                min_stars=min_stars,
-                max_results=max_repos // len(self.tags),
-                time_period_days=days
-            )
-            
-            if isinstance(repos, list):
-                all_repos.extend(repos)
-            
-            # Brief wait to avoid exceeding API rate limits
-            time.sleep(3)
-            
+            # Note: The underlying _run now handles default params like max_results
+            # We might need a way to pass max_repos if finer control is needed later.
+            repos = self.github_tool._run(query=tag)
+
+            if isinstance(repos, list) and repos and "error" not in repos[0]:
+                # Limit results per tag if needed (though _run already limits)
+                all_repos.extend(repos[:repos_per_tag])
+            elif isinstance(repos, list) and repos and "message" in repos[0]:
+                logger.info(f"No results for tag '{tag}' on GitHub.")
+            elif isinstance(repos, list) and repos and "error" in repos[0]:
+                logger.warning(
+                    f"Error fetching data for tag '{tag}': {repos[0]['error']}"
+                )
+
+        logger.info(f"Collected {len(all_repos)} repositories in total.")
         return all_repos
-        
-    def analyze_trends(self, repos: List[Dict[str, Any]]) -> Dict[str, Any]:
+
+    def analyze(self, repos: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
-        Analyze repositories to determine trends.
-        
+        Analyze the collected repository data to identify trends.
+
         Args:
-            repos (List[Dict[str, Any]]): Repositories to analyze
-            
+            repos (List[Dict[str, Any]]): List of repository data.
+
         Returns:
-            Dict[str, Any]: Trend analysis results
+            Dict[str, Any]: Analysis results including top repositories and scores.
         """
         if not repos:
-            return {"error": "No repositories found for analysis."}
-            
-        # Language analysis
+            return {"error": "No repository data to analyze."}
+
+        # Calculate scores for each repository
+        scored_repos = []
+        for repo in repos:
+            score = self._calculate_score(repo)
+            scored_repos.append({**repo, "score": score})
+
+        # Sort repositories by score (descending)
+        sorted_repos = sorted(
+            scored_repos, key=lambda x: x.get("score", 0), reverse=True
+        )
+
+        # Basic analysis: top N repositories, language distribution
+        top_n = 5
+        top_repositories = sorted_repos[:top_n]
+
         language_counts = {}
         for repo in repos:
-            language = repo.get("language")
-            if language:
-                language_counts[language] = language_counts.get(language, 0) + 1
-                
-        # Topic analysis
-        topic_counts = {}
-        for repo in repos:
-            for topic in repo.get("topics", []):
-                topic_counts[topic] = topic_counts.get(topic, 0) + 1
-                
-        # Calculate score for repos (based on stars, forks, and recency)
-        for repo in repos:
-            stars = repo.get("stars", 0)
-            forks = repo.get("forks", 0)
-            
-            # Recency score (newer updates get a higher score)
-            updated_date = datetime.strptime(repo.get("updated_at", "2000-01-01"), "%Y-%m-%d")
-            days_since_update = (datetime.now() - updated_date).days
-            recency_score = max(1, 30 - days_since_update) / 30  # Between 0-1
-            
-            # Total score
-            trend_score = (stars * 0.6) + (forks * 0.3) + (recency_score * 100)
-            repo["trend_score"] = trend_score
-        
-        # Sort trending repos by score
-        trending_repos = sorted(repos, key=lambda x: x.get("trend_score", 0), reverse=True)
-        
-        # Create trend report
-        trends = {
-            "total_repos": len(repos),
-            "top_languages": sorted(language_counts.items(), key=lambda x: x[1], reverse=True)[:10],
-            "top_topics": sorted(topic_counts.items(), key=lambda x: x[1], reverse=True)[:15],
-            "top_trending_repos": trending_repos[:10]
+            lang = repo.get("language")
+            if lang:
+                language_counts[lang] = language_counts.get(lang, 0) + 1
+
+        analysis_summary = {
+            "total_repositories_analyzed": len(repos),
+            "top_repositories": [
+                {
+                    "name": r.get("full_name"),
+                    "url": r.get("url"),
+                    "score": r.get("score")
+                } for r in top_repositories
+            ],
+            "language_distribution": language_counts,
+            "comment": "Trend analysis based on repository scores (stars, forks, recency)."
         }
-        
-        return trends
+
+        return analysis_summary
+
+    def _calculate_score(self, repo: Dict[str, Any]) -> float:
+        """Calculate a score for a repository based on stars, forks, recency."""
+        stars = repo.get("stars", 0)
+        forks = repo.get("forks", 0)
+
+        # Recency score (newer updates get a higher score)
+        try:
+            updated_at_str = repo.get("updated_at", "2000-01-01T00:00:00Z")
+            # Handle potential Z suffix for UTC timezone
+            if updated_at_str.endswith('Z'):
+                updated_at_str = updated_at_str[:-1] + '+00:00'
+            updated_date = datetime.fromisoformat(updated_at_str)
+            # Ensure timezone awareness if comparing with timezone-aware datetime.now()
+            # If updated_date is naive, make datetime.now() naive for comparison
+            now = datetime.now(updated_date.tzinfo) if updated_date.tzinfo else datetime.now()
+            days_since_update = (now - updated_date).days
+        except (ValueError, TypeError):
+            # Default to a large number of days if parsing fails
+            days_since_update = 365 * 10
+
+        recency_score = max(0, 30 - days_since_update) / 30  # Scale 0-1
+
+        # Simple weighted score - adjust weights as needed
+        score = (stars * 0.5) + (forks * 0.3) + (recency_score * 0.2 * 100)
+        return round(score, 2)
