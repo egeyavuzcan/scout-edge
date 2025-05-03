@@ -202,10 +202,4 @@ This command reads a JSON file previously saved by the `collect` command and ana
 
 Future development could enable direct `collect` and `analyze` operations with arguments from the command line.
 
-## Contributing
 
-Contributions are welcome! Please open an issue or submit a pull request.
-
-## License
-
-This project is licensed under the MIT License. See the `LICENSE` file for details (if available).
