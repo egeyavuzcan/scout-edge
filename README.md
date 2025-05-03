@@ -23,7 +23,7 @@ There are two main ways to set up and run Scout-Edge:
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/egeyavuzcan/scout-edge # Replace with your repo URL
+    git clone https://github.com/egeyavuzcan/scout-edge 
     cd scout-edge
     ```
 
